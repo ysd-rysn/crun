@@ -69,7 +69,6 @@ int
 can_handle_multiple_wasm (libcrun_container_t *container, libcrun_error_t *err arg_unused)
 {
   const char *annotation;
-  const char *entrypoint_executable = container->container_def->process->args[0];
 
   annotation = find_annotation (container, "module.wasm.image/multiple");
   if (annotation)
