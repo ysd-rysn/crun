@@ -22,5 +22,6 @@
 #include <unistd.h>
 
 int wasm_can_handle_container (libcrun_container_t *container, libcrun_error_t *err);
+int can_handle_multiple_wasm (libcrun_container_t *container, libcrun_error_t *err);
 
 #endif
