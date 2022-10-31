@@ -40,7 +40,8 @@ extern struct custom_handler_s handler_libkrun;
 extern struct custom_handler_s handler_wasmtime;
 #endif
 #if HAVE_DLOPEN && HAVE_WASMEDGE
-extern struct custom_handler_s handler_wasmedge;
+//extern struct custom_handler_s handler_wasmedge;
+extern struct custom_handler_s handler_wasmedge_with_multiple_wasm;
 #endif
 #if HAVE_DLOPEN && HAVE_WASMER
 extern struct custom_handler_s handler_wasmer;
@@ -54,7 +55,8 @@ static struct custom_handler_s *static_handlers[] = {
   &handler_libkrun,
 #endif
 #if HAVE_DLOPEN && HAVE_WASMEDGE
-  &handler_wasmedge,
+  //&handler_wasmedge,
+  &handler_wasmedge_with_multiple_wasm,
 #endif
 #if HAVE_DLOPEN && HAVE_WASMER
   &handler_wasmer,

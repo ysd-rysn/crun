@@ -29,6 +29,7 @@
 #include <sys/types.h>
 #include <fcntl.h>
 #include <sched.h>
+#include <stdlib.h> // malloc
 
 #ifdef HAVE_DLOPEN
 #  include <dlfcn.h>
@@ -161,27 +162,30 @@ libwasmedge_exec_multiple_wasm (void *cookie, __attribute__ ((unused)) libcrun_c
   void (*WasmEdge_ConfigureAddHostRegistration) (WasmEdge_ConfigureContext * Cxt, enum WasmEdge_HostRegistration Host);
   WasmEdge_VMContext *(*WasmEdge_VMCreate) (const WasmEdge_ConfigureContext *ConfCxt, WasmEdge_StoreContext *StoreCxt);
   void (*WasmEdge_VMDelete) (WasmEdge_VMContext * Cxt);
+  void (*WasmEdge_AsyncWait) (const WasmEdge_Async *Cxt);
+  WasmEdge_Result (*WasmEdge_AsyncGet) (const WasmEdge_Async *Cxt, WasmEdge_Value *Returns, const uint32_t ReturnLen);
+  void (*WasmEdge_AsyncDelete) (WasmEdge_Async *Cxt);
+  WasmEdge_Async *(*WasmEdge_VMAsyncRunWasmFromFile) (WasmEdge_VMContext *Cxt, const char *Path, const WasmEdge_String FuncName, const WasmEdge_Value *Params, const uint32_t ParamLen);
+  uint32_t (*WasmEdge_AsyncGetReturnsLength) (const WasmEdge_Async *Cxt);
   WasmEdge_Result (*WasmEdge_VMRegisterModuleFromFile) (WasmEdge_VMContext * Cxt, WasmEdge_String ModuleName, const char *Path);
   WasmEdge_Result (*WasmEdge_VMRunWasmFromFile) (WasmEdge_VMContext * Cxt, const char *Path, const WasmEdge_String FuncName, const WasmEdge_Value *Params, const uint32_t ParamLen, WasmEdge_Value *Returns, const uint32_t ReturnLen);
   bool (*WasmEdge_ResultOK) (const WasmEdge_Result Res);
   WasmEdge_String (*WasmEdge_StringCreateByCString) (const char *Str);
-  uint32_t n_wasm = 0; // number of wasm files
-  const char *dirs[1] = { "/:/" };
-  WasmEdge_ConfigureContext *configure;
-  WasmEdge_VMContext *vm;
-  WasmEdge_Result result;
-
-  WasmEdge_ModuleInstanceContext *wasi_module;
   WasmEdge_ModuleInstanceContext *(*WasmEdge_VMGetImportModuleContext) (WasmEdge_VMContext * Cxt, const enum WasmEdge_HostRegistration Reg);
-  void (*WasmEdge_ModuleInstanceInitWASI) (WasmEdge_ModuleInstanceContext * Cxt, const char *const *Args, const uint32_t ArgLen, const char *const *Envs, const uint32_t EnvLen, const char *const *Dirs, const uint32_t DirLen, const char *const *Preopens, const uint32_t PreopenLen);
-  WasmEdge_ModuleInstanceInitWASI = dlsym (cookie, "WasmEdge_ModuleInstanceInitWASI");
+  void (*WasmEdge_ModuleInstanceInitWASI) (WasmEdge_ModuleInstanceContext * Cxt, const char *const *Args, const uint32_t ArgLen, const char *const *Envs, const uint32_t EnvLen, const char *const *Preopens, const uint32_t PreopenLen);
 
+  WasmEdge_ModuleInstanceInitWASI = dlsym (cookie, "WasmEdge_ModuleInstanceInitWASI");
   WasmEdge_ConfigureCreate = dlsym (cookie, "WasmEdge_ConfigureCreate");
   WasmEdge_ConfigureDelete = dlsym (cookie, "WasmEdge_ConfigureDelete");
   WasmEdge_ConfigureAddProposal = dlsym (cookie, "WasmEdge_ConfigureAddProposal");
   WasmEdge_ConfigureAddHostRegistration = dlsym (cookie, "WasmEdge_ConfigureAddHostRegistration");
   WasmEdge_VMCreate = dlsym (cookie, "WasmEdge_VMCreate");
   WasmEdge_VMDelete = dlsym (cookie, "WasmEdge_VMDelete");
+  WasmEdge_AsyncWait = dlsym (cookie, "WasmEdge_AsyncWait");
+  WasmEdge_AsyncGet = dlsym (cookie, "WasmEdge_AsyncGet");
+  WasmEdge_AsyncDelete = dlsym (cookie, "WasmEdge_AsyncDelete");
+  WasmEdge_AsyncGetReturnsLength = dlsym (cookie, "WasmEdge_AsyncGetReturnsLength");
+  WasmEdge_VMAsyncRunWasmFromFile = dlsym (cookie, "WasmEdge_VMAsyncRunWasmFromFile");
   WasmEdge_VMRegisterModuleFromFile = dlsym (cookie, "WasmEdge_VMRegisterModuleFromFile");
   WasmEdge_VMGetImportModuleContext = dlsym (cookie, "WasmEdge_VMGetImportModuleContext");
   WasmEdge_VMRunWasmFromFile = dlsym (cookie, "WasmEdge_VMRunWasmFromFile");
@@ -190,51 +194,98 @@ libwasmedge_exec_multiple_wasm (void *cookie, __attribute__ ((unused)) libcrun_c
 
   if (WasmEdge_ConfigureCreate == NULL || WasmEdge_ConfigureDelete == NULL || WasmEdge_ConfigureAddProposal == NULL
       || WasmEdge_ConfigureAddHostRegistration == NULL || WasmEdge_VMCreate == NULL || WasmEdge_VMDelete == NULL
-      || WasmEdge_VMRegisterModuleFromFile == NULL || WasmEdge_VMGetImportModuleContext == NULL
+	  || WasmEdge_AsyncWait == NULL || WasmEdge_AsyncGet == NULL || WasmEdge_AsyncDelete == NULL || WasmEdge_VMAsyncRunWasmFromFile == NULL
+      || WasmEdge_AsyncGetReturnsLength == NULL || WasmEdge_VMRegisterModuleFromFile == NULL || WasmEdge_VMGetImportModuleContext == NULL
       || WasmEdge_ModuleInstanceInitWASI == NULL || WasmEdge_VMRunWasmFromFile == NULL
       || WasmEdge_ResultOK == NULL || WasmEdge_StringCreateByCString == NULL)
     error (EXIT_FAILURE, 0, "could not find symbol in `libwasmedge.so.0`");
 
+  uint32_t n_wasm = 0; // Number of wasm files.
+  // Count wasm files.
+  for (char *const *arg = argv; *arg != NULL; ++arg, ++n_wasm)
+    ;
+
+  // TODO: Create directory map for each wasm.
+  const char *dirs[1] = { "/:/" };
+
+  WasmEdge_ConfigureContext *configure;
+  WasmEdge_VMContext **vm = (WasmEdge_VMContext **) malloc (n_wasm * sizeof (WasmEdge_VMContext *));
+  WasmEdge_Async **async = (WasmEdge_Async **) malloc (n_wasm * sizeof (WasmEdge_Async *));
+  WasmEdge_Result *result = (WasmEdge_Result *) malloc (n_wasm * sizeof (WasmEdge_Result));
+  WasmEdge_ModuleInstanceContext **wasi_module = (WasmEdge_ModuleInstanceContext **) malloc (n_wasm * sizeof (WasmEdge_ModuleInstanceContext *));
+  uint32_t *arity = (uint32_t *) malloc (n_wasm * sizeof (uint32_t));
+
+  // Create config.
   configure = WasmEdge_ConfigureCreate ();
   if (UNLIKELY (configure == NULL))
-    error (EXIT_FAILURE, 0, "could not create wasmedge configure");
+    {
+	  // TODO: Deallocate all resources.
+	  error (EXIT_FAILURE, 0, "could not create wasmedge configure");
+	}
 
   WasmEdge_ConfigureAddProposal (configure, WasmEdge_Proposal_BulkMemoryOperations);
   WasmEdge_ConfigureAddProposal (configure, WasmEdge_Proposal_ReferenceTypes);
   WasmEdge_ConfigureAddProposal (configure, WasmEdge_Proposal_SIMD);
   WasmEdge_ConfigureAddHostRegistration (configure, WasmEdge_HostRegistration_Wasi);
 
-  vm = WasmEdge_VMCreate (configure, NULL);
-  if (UNLIKELY (vm == NULL))
+  for (int i = 0; i < n_wasm; i++)
     {
-      WasmEdge_ConfigureDelete (configure);
-      error (EXIT_FAILURE, 0, "could not create wasmedge vm");
-    }
+	  // Create vm.
+	  vm[i] = WasmEdge_VMCreate (configure, NULL);
+	  if (UNLIKELY (vm[i] == NULL))
+		{
+		  // TODO: Deallocate all resources.
+		  error (EXIT_FAILURE, 0, "could not create wasmedge vm");
+		}
 
-  wasi_module = WasmEdge_VMGetImportModuleContext (vm, WasmEdge_HostRegistration_Wasi);
-  if (UNLIKELY (wasi_module == NULL))
-    {
-      WasmEdge_VMDelete (vm);
-      WasmEdge_ConfigureDelete (configure);
-      error (EXIT_FAILURE, 0, "could not get wasmedge wasi module context");
-    }
+      wasi_module[i] = WasmEdge_VMGetImportModuleContext (vm[i], WasmEdge_HostRegistration_Wasi);
+	  if (UNLIKELY (wasi_module[i] == NULL))
+		{
+		  // TODO: Deallocate all resources.
+		  error (EXIT_FAILURE, 0, "could not get wasmedge wasi module context");
+		}
 
-  for (char *const *arg = argv; *arg != NULL; ++arg, ++argn)
-    ;
+      // Initialize wasi module.
+      WasmEdge_ModuleInstanceInitWASI (wasi_module[i], (const char *const *) &argv[i], 1, NULL, 0, dirs, 1);
 
-  WasmEdge_ModuleInstanceInitWASI (wasi_module, (const char *const *) &argv[0], argn, NULL, 0, dirs, 1, NULL, 0);
+      // Run wasm asynchronously.
+	  async[i] = WasmEdge_VMAsyncRunWasmFromFile (vm[i], argv[i], WasmEdge_StringCreateByCString ("_start"), NULL, 0);
+	  if (UNLIKELY (async[i] == NULL))
+	    {
+		  // TODO: Deallocate all resources.
+		  error (EXIT_FAILURE, 0, "could not get wasmedge async object");
+	    }
+	}
 
-  result = WasmEdge_VMRunWasmFromFile (vm, pathname, WasmEdge_StringCreateByCString ("_start"), NULL, 0, NULL, 0);
+  for (int i = 0; i < n_wasm; i++)
+	{
+      // Wait for the execution.
+	  WasmEdge_AsyncWait (async[i]);
 
-  if (UNLIKELY (! WasmEdge_ResultOK (result)))
-    {
-      WasmEdge_VMDelete (vm);
-      WasmEdge_ConfigureDelete (configure);
-      error (EXIT_FAILURE, 0, "could not get wasmedge result from VM");
-    }
+	  // Check the returns length.
+      arity[i] = WasmEdge_AsyncGetReturnsLength (async[i]);
 
-  WasmEdge_VMDelete (vm);
+	  // Get the result.
+      result[i] = WasmEdge_AsyncGet (async[i], NULL, arity[i]);
+	  if (UNLIKELY (! WasmEdge_ResultOK(result[i])))
+		{
+		  // TODO: Deallocate all resources.
+		  error (EXIT_FAILURE, 0, "could not get wasmedge result from VM");
+		}
+	}
+
+  // Deallocate all resources.
+  for (int i = 0; i < n_wasm; i++)
+	{
+	  WasmEdge_AsyncDelete (async[i]);
+      WasmEdge_VMDelete (vm[i]);
+	}
   WasmEdge_ConfigureDelete (configure);
+  free (vm);
+  free (async);
+  free (result);
+  free (wasi_module);
+  free (arity);
   exit (EXIT_SUCCESS);
 }
 
@@ -270,7 +321,7 @@ struct custom_handler_s handler_wasmedge_with_multiple_wasm = {
   .load = libwasmedge_load,
   .unload = libwasmedge_unload,
   .exec_func = libwasmedge_exec_multiple_wasm,
-  .can_handle_container = wasmedge_can_handle_multiple_wasm,
+  .can_handle_container = wasmedge_can_handle_container, // TODO: Switch to wasmedge_can_handle_multiple_wasm.
 };
 
 #endif
