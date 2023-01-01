@@ -4329,6 +4329,12 @@ libcrun_run_linux_container (libcrun_container_t *container, container_entrypoin
 
   /* Initialize the new process and make sure to join/create all the required namespaces.  */
   ret = init_container (container, sync_socket_container, &init_status, err);
+
+  // TODO: Print time.
+  struct timeval tv_init;
+  gettimeofday(&tv_init, NULL);
+  fprintf(stdout, "init time: %llu.%06llu\n", (unsigned long long)tv_init.tv_sec, (unsigned long long)tv_init.tv_usec);
+
   if (UNLIKELY (ret < 0))
     {
       ret = TEMP_FAILURE_RETRY (write (sync_socket_container, &failure, 1));
