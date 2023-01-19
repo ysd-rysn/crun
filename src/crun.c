@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <argp.h>
 #include <string.h>
+#include <sys/time.h>
 #ifdef HAVE_LIBKRUN
 #  include <libgen.h>
 #endif
@@ -343,6 +344,11 @@ int ensure_cloned_binary (void);
 int
 main (int argc, char **argv)
 {
+  //TODO: Print time.
+  struct timeval tv_init;
+  gettimeofday(&tv_init, NULL);
+  fprintf(stdout, "crun start time: %llu.%06llu\n", (unsigned long long)tv_init.tv_sec, (unsigned long long)tv_init.tv_usec);
+
   libcrun_error_t err = NULL;
   int ret, first_argument = 0;
 
